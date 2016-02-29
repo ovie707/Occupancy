@@ -1,0 +1,407 @@
+/*CO2GridV2.3
+ * Ovie Onoriose
+ */
+
+//includes
+#include <stdint.h> // Variable definitions for the C99 standard.
+#include <stdio.h> // Input and output facilities for the C99 standard.
+#include <stdbool.h> // Boolean definitions for the C99 standard.
+#include "inc/tm4c123gh6pm.h" // Definitions for the interrupt and register assignments.
+#include "inc/hw_memmap.h" // Memory map definitions of the Tiva C Series device.
+#include "inc/hw_types.h" // Definitions of common types and macros.
+#include "driverlib/sysctl.h" // Definitions and macros for System Control API of DriverLib.
+#include "driverlib/interrupt.h" // Defines and macros for NVIC Controller API of DriverLib.
+#include "driverlib/gpio.h" // Definitions and macros for GPIO API of DriverLib.
+#include "driverlib/timer.h" // Defines and macros for Timer API of DriverLib.
+#include "driverlib/pin_map.h" //Mapping of peripherals to pins for all parts.
+#include "driverlib/uart.h" // Definitions and macros for UART API of DriverLib.
+#include "driverlib/adc.h" // Definitions for ADC API of DriverLib.
+#include "driverlib/fpu.h" // Prototypes for the FPU manipulation routines.
+#include "driverlib/ssi.h"
+#include "stdarg.h"
+#include "driverlib/i2c.h"
+#include "driverlib/uart.h"
+#include "utils/uartstdio.h" // Prototypes for the UART console functions.
+
+//function prototypes
+void init_timer(void);
+//void output(void);
+void duty_cycle(void);
+void grid_eye(void);
+void setOpMode(int mode);
+void setFrameRate(int frame_rate);
+void thermistor(void);
+void initI2C(void);
+void sendI2C(int slave_addr, int data_amount, ...);
+int getI2C(int slave_addr, int reg);
+void init_UART(void);
+
+
+//variables
+#define TIMER1_FREQ 1
+#define UART_BAUDRATE 115200
+#define SLAVE_ADDRESS 0x68
+int sys_clock, start = 0, end = 0, duty = 0, x = 0, sum = 0, pix, temp[8][8] = {}, i, j, count;
+
+int main(void)
+
+{
+
+	// Sets the system clock to run at 40 MHz
+	SysCtlClockSet(SYSCTL_SYSDIV_5|SYSCTL_USE_PLL|SYSCTL_XTAL_16MHZ|SYSCTL_OSC_MAIN);
+	sys_clock = SysCtlClockGet();
+
+	IntMasterEnable();
+
+	init_timer();
+	initI2C();
+	init_UART();
+
+	UARTprintf("test\n");
+	setOpMode(0x00);
+	setFrameRate(10);
+
+
+	TimerEnable(TIMER1_BASE, TIMER_A);
+	TimerEnable(TIMER0_BASE, TIMER_BOTH);
+	count = 0;
+
+	while(1);
+}
+
+void init_timer(void)
+{
+
+	/////////////////////////////////////////
+	//////Timer for Grid-Eye/////////////////
+	/////////////////////////////////////////
+
+	// Enable and configure Timer1 peripheral.
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
+	// Configure as a 32-bit timer in periodic mode.
+	TimerConfigure(TIMER1_BASE, TIMER_CFG_PERIODIC);
+	// Initialize timer load register.
+	TimerLoadSet(TIMER1_BASE, TIMER_A, sys_clock*TIMER1_FREQ -1);
+	// Registers a function to be called when the interrupt occurs.
+	IntRegister(INT_TIMER1A, grid_eye);
+	// The specified interrupt is enabled in the interrupt controller.
+	IntEnable(INT_TIMER1A);
+	// Enable the indicated timer interrupt source.
+	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
+//	TimerLoadSet(TIMER1_BASE, TIMER_B, sys_clock*2 -1);
+//	IntRegister(INT_TIMER1B, output);
+//	IntEnable(INT_TIMER1B);
+//	TimerIntEnable(TIMER1_BASE,TIMER_TIMB_TIMEOUT);
+
+
+	//////////////////////////////////////////
+	//////Timers for CO2 Sensor///////////////
+	//////////////////////////////////////////
+
+	// Enable and configure Timer0 peripheral.
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
+
+	// Initialize timer A and B to count up in edge time mode
+	TimerConfigure(TIMER0_BASE, (TIMER_CFG_SPLIT_PAIR | TIMER_CFG_A_CAP_TIME_UP | TIMER_CFG_B_CAP_TIME_UP));
+
+	// Timer a records pos edge time and Timer b records neg edge time
+	TimerControlEvent(TIMER0_BASE, TIMER_A, TIMER_EVENT_POS_EDGE);
+	TimerControlEvent(TIMER0_BASE, TIMER_B, TIMER_EVENT_NEG_EDGE);
+
+	//set the value that the timers count to (0x9C3F = 39999)
+	//CO2 sensor outputs 1khz pwm so with mcu at 40Mhz, timers should stay in sync with CO2 output
+	TimerLoadSet(TIMER0_BASE, TIMER_BOTH, 0x9C3F);
+
+	//Configure the pin that timer a and timer b read from
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+	GPIOPinConfigure(GPIO_PB6_T0CCP0);
+	GPIOPinTypeTimer(GPIO_PORTB_BASE, GPIO_PIN_6);
+	GPIOPinConfigure(GPIO_PB7_T0CCP1);
+	GPIOPinTypeTimer(GPIO_PORTB_BASE, GPIO_PIN_7);
+
+	// Registers a interrupt function to be called when timer b hits a neg edge event
+	IntRegister(INT_TIMER0B, duty_cycle);
+	// Makes sure the interrupt is cleared
+	TimerIntClear(TIMER0_BASE, TIMER_CAPB_EVENT);
+	// Enable the indicated timer interrupt source.
+	TimerIntEnable(TIMER0_BASE, TIMER_CAPB_EVENT);
+	// The specified interrupt is enabled in the interrupt controller.
+	IntEnable(INT_TIMER0B);
+
+}
+
+void duty_cycle(void)
+{
+	TimerIntClear(TIMER0_BASE, TIMER_CAPB_EVENT);
+	x += 1;
+	start = TimerValueGet(TIMER0_BASE, TIMER_A);
+	end = TimerValueGet(TIMER0_BASE, TIMER_B);
+	sum += (abs(start-end))/400;
+	if(x == 1000)
+	{
+		duty = sum / 1000;
+		sum = 0;
+		x = 0;
+	}
+
+}
+
+//////////////////////////////////////////////////////////
+///////////////BEGIN LEVEL2 I2C FUNCTIONS/////////////////
+//////////////////////////////////////////////////////////
+
+void grid_eye(void)
+{
+
+
+	// Clear the timer interrupt.
+	TimerIntClear(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
+	thermistor();
+	UARTprintf("CO2 sensor: %d percent duty cycle \nCount: %d\n", duty, count++);
+
+	for (i = 0; i < 8; i++)
+	{
+		for (j = 0; j < 8; j++)
+		{
+			pix = getI2C(SLAVE_ADDRESS, (128+(16*i)+(2*j)+1));
+			pix <<= 8;
+			pix |= getI2C(SLAVE_ADDRESS, (128+(16*i)+(2*j)));
+			temp[i][j] = pix / 4;
+			UARTprintf("%d ", temp[i][j]);
+		}
+		UARTprintf("\n");
+	}
+
+
+}
+
+void setOpMode(int mode)
+{
+	//Set the operation mode based on arguement
+	//0x00 Normal mode
+	//0x10 Sleep mode
+	//0x20 Stand-by mode (60sec intermittence)
+	//0x21 Stand-by mode (10sec intermittence)
+
+	//Note! Once you're in sleep mode you have to return to normal mode before you can do anything else
+
+	sendI2C(SLAVE_ADDRESS, 2, 0x00, mode);
+
+	//Output confirmation through UART to serial interface (PuTTY)
+
+	int result = getI2C(SLAVE_ADDRESS, 0x00);
+
+	if(mode == 16){
+			UARTprintf("The Grid-Eye is operating in Sleep mode\n");
+			UARTprintf("You must return to Normal mode before you can do anything else\n");
+		}
+	if(result == 0){
+		UARTprintf("The Grid-Eye is operating in Normal mode\n");
+	}
+	else if(result == 32){
+		UARTprintf("The Grid-Eye is operating in Stand-by Mode with a 60 sec intermittence\n");
+	}
+	else if(result == 33){
+		UARTprintf("The Grid-Eye is operating in Stand-by Mode with a 10 sec intermittence\n");
+	}
+
+}
+
+void setFrameRate(int frame_rate)
+{
+	//Set the frame rate based on arguement
+	//1: 1 FPS
+	//0: 10 FPS
+
+	sendI2C(SLAVE_ADDRESS, 2, 0x02, frame_rate);
+
+	//Output confirmation through UART to serial interface (PuTTY)
+	int result = getI2C(SLAVE_ADDRESS, 0x02);
+
+	if(result == 1){
+		UARTprintf("The Grid-Eye is operating at 1 FPS\n");
+	}
+	if(result == 0){
+		UARTprintf("The Grid-Eye is operating at 10 FPS\n");
+	}
+}
+
+void thermistor(void)
+{
+	// Clear the timer interrupt.
+		TimerIntClear(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
+	int read;
+	int temp;
+	//Returns the temperature of the thermistor
+
+	read = getI2C(SLAVE_ADDRESS,0x0F);
+	read <<= 8;
+	read |= getI2C(SLAVE_ADDRESS,0x0E);
+	//converts the value in the register to it's corresponding temperature
+	temp = read / 16;
+	UARTprintf("\nThermistor: %d degrees Celsius\n", temp);
+
+//	return temp;
+}
+
+
+/////////////////////////////////////////////////////////
+///////////////BEGIN BASIC I2C FUNCTIONS/////////////////
+/////////////////////////////////////////////////////////
+
+void initI2C(void)
+{
+
+	//enable the I2C module 0
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C0);
+	while(!(SysCtlPeripheralReady(SYSCTL_PERIPH_I2C0)));
+
+	//reset module
+	SysCtlPeripheralReset(SYSCTL_PERIPH_I2C0);
+
+	//enable GPIO peripheral that contains I2C 0
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+
+	// Configure the pin muxing for I2C0 functions on port B2 and B3.
+	GPIOPinConfigure(GPIO_PB2_I2C0SCL);
+	GPIOPinConfigure(GPIO_PB3_I2C0SDA);
+
+	// Select the I2C function for these pins.
+	// SCL = PB2
+	// SDA = PB3
+	GPIOPinTypeI2CSCL(GPIO_PORTB_BASE, GPIO_PIN_2);
+	GPIOPinTypeI2C(GPIO_PORTB_BASE, GPIO_PIN_3);
+
+	//Enable and initialize the I2C0 master module in fast mode
+	I2CMasterInitExpClk(I2C0_BASE, sys_clock, false);
+
+}
+
+// function to transmit on i2c, first argument after data_amount is the register, then after that the value.
+// you can only write to one register with each function call.
+void sendI2C (int slave_addr, int data_amount, ...)
+{
+
+	int i;
+
+	// Tell the master module what address it will place on the bus when communicating with the slave.
+	// falce = write; true = read
+	I2CMasterSlaveAddrSet(I2C0_BASE, slave_addr, false);
+
+	//Creates a list of variables
+	va_list vdata;
+
+	//initialize the va_list with data_amount, then it'll start reading values from
+	//function arguements.
+	va_start(vdata, data_amount);
+
+	//put data to be sent into FIFO
+	I2CMasterDataPut(I2C0_BASE, va_arg(vdata, int));
+
+	//if there is only one argument, use the single send I2C function
+	if(data_amount == 2)
+	{
+		//Initiate send of data from the MCU
+		I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_SINGLE_SEND);
+
+		// Wait until MCU is done transferring.
+//		while(!(I2CMasterBusy(I2C0_BASE)));
+		while(I2CMasterBusy(I2C0_BASE));
+
+		//"close" variable argument list
+		va_end(vdata);
+	}
+
+	//otherwise, we start transmission of multiple bytes on the
+	//I2C bus
+	else if(data_amount > 2)
+	{
+		//Initiate send of data from the MCU
+		I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+
+		// Wait until MCU is done transferring.
+//		while(!(I2CMasterBusy(I2C0_BASE)));
+		while(I2CMasterBusy(I2C0_BASE));
+
+		//send num_of_args-2 pieces of data, using the
+		//BURST_SEND_CONT command of the I2C module
+		for(i = 1; i < (data_amount - 1); i++)
+		{
+			//put next piece of data into I2C FIFO
+			I2CMasterDataPut(I2C0_BASE, va_arg(vdata, int));
+			//send next data that was just placed into FIFO
+			I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_BURST_SEND_CONT);
+
+			// Wait until MCU is done transferring.
+//			while(!(I2CMasterBusy(I2C0_BASE)));
+			while(I2CMasterBusy(I2C0_BASE));
+		}
+
+		//put last piece of data into I2C FIFO
+		I2CMasterDataPut(I2C0_BASE, va_arg(vdata, int));
+		//send next data that was just placed into FIFO
+		I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+		// Wait until MCU is done transferring.
+//		while(!(I2CMasterBusy(I2C0_BASE)));
+		while(I2CMasterBusy(I2C0_BASE));
+
+		//"close" variable args list
+		va_end(vdata);
+	}
+}
+
+int getI2C(int slave_addr, int reg)
+{
+	//we first have to write the address to the i2c line to specify which slave we want to read from.
+	//false = write; true = read
+	I2CMasterSlaveAddrSet(I2C0_BASE, slave_addr, false);
+
+	//what register do you want to read
+	I2CMasterDataPut(I2C0_BASE, reg);
+
+	//send the register data to the slave
+	I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_SINGLE_SEND);
+
+	//wait for MCU to finish transaction
+//	while(!(I2CMasterBusy(I2C0_BASE)));
+	while(I2CMasterBusy(I2C0_BASE));
+
+	//specify that we are going to read from slave device
+	I2CMasterSlaveAddrSet(I2C0_BASE, slave_addr, true);
+
+	//send control byte and read from the register we specified
+	I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+
+	//wait for MCU to finish transaction
+//	while(!(I2CMasterBusy(I2C0_BASE)));
+	while(I2CMasterBusy(I2C0_BASE));
+
+	//return data pulled from the specified register
+	return I2CMasterDataGet(I2C0_BASE);
+}
+
+//use this one to output over the pins to Xbee for instance.
+void init_UART(void)
+{
+	// Enable and configure UART0 for debugging printouts.
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART1);
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+	GPIOPinConfigure(GPIO_PB0_U1RX);
+	GPIOPinConfigure(GPIO_PB1_U1TX);
+	GPIOPinTypeUART(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
+	UARTStdioConfig(1, UART_BAUDRATE, sys_clock);
+}
+
+////use this one to output to Putty
+//void init_UART(void)
+//{
+//	// Enable and configure UART0 for debugging printouts.
+//	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
+//	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+//	GPIOPinConfigure(GPIO_PA0_U0RX);
+//	GPIOPinConfigure(GPIO_PA1_U0TX);
+//	GPIOPinTypeUART(GPIO_PORTA_BASE, (GPIO_PIN_0 | GPIO_PIN_1));
+//	UARTStdioConfig(0, UART_BAUDRATE, sys_clock);
+//}
