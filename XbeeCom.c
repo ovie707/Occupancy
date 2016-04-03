@@ -1,7 +1,7 @@
 /*
 Ovie Onoriose
 
-XbeeComms V1.2
+XbeeComms V1.2.2
 
 Trying out API mode with xBees
 
@@ -167,17 +167,17 @@ void send_packet(void)
 //	for(i = 0; i < sizeof(packet); i++)
 //		UARTCharPut(UART1_BASE, packet[i]);
 
-	char grideye[] = {53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53,\
-			53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53,\
-			53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53,\
-			53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53, 53};
+	char grideye[] = {5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,\
+			5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,\
+			5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,\
+			5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5};
 
 //	for(i = 0; i < 128; i++)
 //	{
 //		UARTCharPut(UART0_BASE, grideye[i]);
 //	}
 
-	send_grideye_packet(&grideye, 0x1A80);
+	send_grideye_packet(grideye, 0x1A80);
 }
 
 void send_grideye_packet(char *data, int data_sum) //data should be 128 bytes long
@@ -197,7 +197,7 @@ void send_grideye_packet(char *data, int data_sum) //data should be 128 bytes lo
 	//	xbee frame checksum 1 byte
 
 	//initalizing array to beginning of xbee frame (doesn't include RF data or chksum)
-	char packet[150] = {0x7E, 0x00, 0x92, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x00, 0x00};
+	char packet[150] = {0x7E, 0x00, 0x92, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x00, 0x00};
 	int i;
 
 	packet[17] = 0x01; //unit identifier: this unit is #1
