@@ -98,7 +98,7 @@ void init_UART(int choice)
 
 void grideye_data(void)
 {
-//	GPIOIntClear(GPIO_PORTE_BASE, GPIO_PIN_4);
+	GPIOIntClear(GPIO_PORTE_BASE, GPIO_PIN_4);
 //	GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, ui8PinData);
 //	SysCtlDelay(1000);
 //	GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, 0x00);
