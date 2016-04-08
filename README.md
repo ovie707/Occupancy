@@ -11,3 +11,6 @@ This code creates a dummy grideye packet and periodically sends an API packet co
 
 #XbeeComs V1-3
 This code replaces the timer interrupt of XbeeComs with a Pin interrupt so the sensor unit will only send data when it's requested.
+
+#PCB 
+The .brd and .sch files were created using Eagle CS for the Occupancy project. These files will be converted into Gerber files to be sent to a professional fabricator. 
