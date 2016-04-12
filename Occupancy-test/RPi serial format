@@ -1,0 +1,59 @@
+The Raspberry Pi is going to send and receive data via the Xbee to the sensor nodes on the network. The Raspberry Pi will first send out a packet to request data, then it will wait to receive the requested data.
+
+This is the packet to request data. Note that these values are in HEX, so either send the hex values, or convert to decimal or binary or whatever you want first.
+
+Remote AT Command Request (API 1)
+
+7E 00 10 17 00 00 13 A2 00 40 7A AC 88 FF FE 02 44 31 05 CB
+
+Start delimiter: 7E
+Length: 00 10 (16)
+Frame type: 17 (Remote AT Command Request)
+Frame ID: 00 (0)
+64-bit dest. address: 00 13 A2 00 40 7A AC 88
+16-bit dest. address: FF FE
+Command options: 02
+AT Command: 44 31 (D1)
+Parameter: 05
+Checksum: CB
+
+What this packet does is activate a pin interrupt on the launchpad, which causes it to send a packet to you.
+
+Once you’ve sent the above command you have to reset the pin by using the following packet. You can’t make another request until you reset the pin with this packet.  Note that these values are also in hex
+
+Remote AT Command Request (API 1)
+
+7E 00 10 17 00 00 13 A2 00 40 7A AC 88 FF FE 02 44 31 04 CC
+
+Start delimiter: 7E
+Length: 00 10 (16)
+Frame type: 17 (Remote AT Command Request)
+Frame ID: 00 (0)
+64-bit dest. address: 00 13 A2 00 40 7A AC 88
+16-bit dest. address: FF FE
+Command options: 02
+AT Command: 44 31 (D1)
+Parameter: 04
+Checksum: CC
+
+Once you’ve sent the first packet, you should be preparing to receive a packet containing the data. Here’s an example of the data that will come in to the UART. Please note that all values are in HEX.
+
+Receive Packet (API 1)
+
+7E 00 90 90 00 13 A2 00 40 7A AC 88 76 3E 01 01 01 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 DF DF D7
+
+Start delimiter: 7E
+Length: 00 90 (144)
+Frame type: 90 (Receive Packet)
+64-bit source address: 00 13 A2 00 40 7A AC 88
+16-bit source address: 76 3E
+Receive options: 01
+RF data: 01 01 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 05 DF DF
+Checksum: D7
+
+As you can see, Every packet will start the byte 0x7E, then the next two bytes denote the amount of bytes between it and the checksum. The length does not include the starting byte, length, or checksum bytes. The Frame type says what kind of data it is. NOTE: you should be checking this byte and discarding the entire packet if it doesn’t say 0x90. The next 8 bytes correspond to the address of where the data came from, You can use this to differentiate between nodes if you want, but I included a byte in the RF Data that specifies which node the data came from. The next two bytes are the network source address and you don’t have to do anything with it. The next byte receive options is something you don’t have to worry about either. 
+
+RF Data will always start at position 16 in the packet so if you put the entire packet in an array, since arrays start at 0, the RF data’s 1st value would be at packet[15]. Remember that this data will come out in hex. In the RF Data specifically, the first byte will specify which node it’s coming from, so in the example above, the first byte is 01 so the data is coming form sensor node #1. The next node will be the duty cycle of the CO2 sensor. The next 128 bytes (which are all 5 in this example) is dummy grid eye data. It’s not shown in this example, but after the grid eye data, I’ll put the CO2 and DHT11, data as well. I’ll tell you how many bytes those take up when I get around to them. The last two bytes (DF DF) are what signify the end of the RF Data. Once you reach these two bytes no that there is no more data afterwards.
+
+Don’t worry about the checksum, it’s mainly for the xbees.
+
