@@ -1,0 +1,420 @@
+/*
+Ovie Onoriose
+
+Occupancy-testingV1.1
+
+Putting together all of the parts.
+Xbee activates a pin interrupt
+Launchpad reads data from the grideye and other sensors
+Data is sent back out through the Xbee, using API mode
+*/
+
+//includes
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include "stdarg.h"
+#include "inc/tm4c123gh6pm.h"
+#include "inc/hw_memmap.h"
+#include "inc/hw_types.h"
+#include "inc/hw_ints.h"
+#include "driverlib/sysctl.h"
+#include "driverlib/interrupt.h"
+#include "driverlib/gpio.h"
+#include "driverlib/timer.h"
+#include "driverlib/pin_map.h"
+#include "driverlib/uart.h"
+#include "driverlib/i2c.h"
+#include "utils/uartstdio.h"
+
+//function prototypes
+void init_CO2(void); //enables timers to read the duty cycle off of the CO2 sensor
+void init_trigger(void); // enables pin interupt so Rpi can request data through the xbee digital output using a remote at command
+void init_UART(int choice); // enables uart
+void grideye_data(void); // reads sensor data from grideye
+void send_data_packet(char *data); // sends data out the uart in API transmit request format to go to Rpi
+void duty_cycle(void); // calculates the duty cycle of the CO2 sensor
+void setOpMode(int mode); //sets the operation mode of the grideye
+void setFrameRate(int frame_rate); // sets the frame rate of the grideye 1 for 1fps 0 for 10fps
+void thermistor(void); // reads the temperature of the grideye
+void init_I2C(void); //initializes I2C with the grideye
+void sendI2C(int slave_addr, int data_amount, ...); //function to send values over i2c
+int getI2C(int slave_addr, int reg); //function to read registers over I2C
+
+//variables
+uint8_t ui8PinData=2;
+char duty = 0;
+int sys_clock, start = 0, end = 0, x = 0, sum = 0, i, j, count;
+#define SLAVE_ADDRESS 0x68
+#define TIMER_FREQ 3
+#define UART_BAUDRATE 115200
+#define XBEE 1
+#define PUTTY 0
+
+int main(void)
+{
+	// Sets the system clock to run using a 16 MHz crystal on the main oscillator to drive the 400 MHz PLL.
+	SysCtlClockSet(SYSCTL_SYSDIV_5|SYSCTL_USE_PLL|SYSCTL_XTAL_16MHZ|SYSCTL_OSC_MAIN);
+	sys_clock = SysCtlClockGet();
+
+	IntMasterEnable();
+
+	init_CO2();
+	init_I2C();
+	setOpMode(0x00); //setting the operation mode of the grideye
+	//0x00 Normal mode
+	//0x10 Sleep mode
+	//0x20 Stand-by mode (60sec intermittence)
+	//0x21 Stand-by mode (10sec intermittence)
+	setFrameRate(1); //setup the grideye to refresh the registers at 1fps (user 0 for 10fps)
+	init_trigger();
+	init_UART(XBEE); //set to 1 for xBee output //set to 0 for Putty output
+
+
+
+	while(1){}
+}
+
+void init_CO2(void)
+{
+	//Timers for CO2 Sensor
+
+	// Enable and configure Timer0 peripheral.
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
+
+	// Initialize timer A and B to count up in edge time mode
+	TimerConfigure(TIMER0_BASE, (TIMER_CFG_SPLIT_PAIR | TIMER_CFG_A_CAP_TIME_UP | TIMER_CFG_B_CAP_TIME_UP));
+
+	// Timer a records pos edge time and Timer b records neg edge time
+	TimerControlEvent(TIMER0_BASE, TIMER_A, TIMER_EVENT_POS_EDGE);
+	TimerControlEvent(TIMER0_BASE, TIMER_B, TIMER_EVENT_NEG_EDGE);
+
+	//set the value that the timers count to (0x9C3F = 39999)
+	//CO2 sensor outputs 1khz pwm so with mcu at 40Mhz, timers should stay in sync with CO2 output
+	TimerLoadSet(TIMER0_BASE, TIMER_BOTH, 0x9C3F);
+
+	//Configure the pin that timer a and timer b read from
+	//PB6 & PB7
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+	GPIOPinConfigure(GPIO_PB6_T0CCP0);
+	GPIOPinTypeTimer(GPIO_PORTB_BASE, GPIO_PIN_6);
+	GPIOPinConfigure(GPIO_PB7_T0CCP1);
+	GPIOPinTypeTimer(GPIO_PORTB_BASE, GPIO_PIN_7);
+
+	// Registers a interrupt function to be called when timer b hits a neg edge event
+	IntRegister(INT_TIMER0B, duty_cycle);
+	// Makes sure the interrupt is cleared
+	TimerIntClear(TIMER0_BASE, TIMER_CAPB_EVENT);
+	// Enable the indicated timer interrupt source.
+	TimerIntEnable(TIMER0_BASE, TIMER_CAPB_EVENT);
+	// The specified interrupt is enabled in the interrupt controller.
+	IntEnable(INT_TIMER0B);
+
+
+	TimerEnable(TIMER0_BASE, TIMER_BOTH);
+}
+
+//Enable Pin PE1 to be used to create pin interrupts
+void init_trigger(void)
+{
+	// Enable and configure PE1 as digital input
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
+	GPIOPinTypeGPIOInput(GPIO_PORTE_BASE, GPIO_PIN_1);
+	GPIOPadConfigSet(GPIO_PORTE_BASE, GPIO_PIN_1, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPD);
+	GPIOIntTypeSet(GPIO_PORTE_BASE, GPIO_PIN_1, GPIO_RISING_EDGE);
+	GPIOIntRegister(GPIO_PORTE_BASE, grideye_data);
+	IntEnable(INT_GPIOE_TM4C123);
+	GPIOIntEnable(GPIO_PORTE_BASE, GPIO_INT_PIN_1);
+
+//	// Enable and configure Timer1 peripheral.
+//	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
+//	// Configure as a 32-bit timer in periodic mode.
+//	TimerConfigure(TIMER1_BASE, TIMER_CFG_PERIODIC);
+//	// Initialize timer load register.
+//	TimerLoadSet(TIMER1_BASE, TIMER_A, sys_clock*TIMER_FREQ -1);
+//	// Registers a function to be called when the interrupt occurs.
+//	IntRegister(INT_TIMER1A, grideye_data);
+//	// The specified interrupt is enabled in the interrupt controller.
+//	IntEnable(INT_TIMER1A);
+//	// Enable the indicated timer interrupt source.
+//	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
+//	TimerEnable(TIMER1_BASE, TIMER_A);
+}
+
+
+void init_UART(int choice)
+{
+	if (choice == 1)
+	{
+		//UART outputs using the following pins
+		//PB0 is Launchpad input
+		//PB1 is Launchpad output
+		SysCtlPeripheralEnable(SYSCTL_PERIPH_UART1);
+		SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+		GPIOPinConfigure(GPIO_PB0_U1RX);
+		GPIOPinConfigure(GPIO_PB1_U1TX);
+		GPIOPinTypeUART(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
+		UARTStdioConfig(1, UART_BAUDRATE, sys_clock);
+	}
+	else
+	{
+		// UART outputs over USB to Putty
+		SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
+		SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+		GPIOPinConfigure(GPIO_PA0_U0RX);
+		GPIOPinConfigure(GPIO_PA1_U0TX);
+		GPIOPinTypeUART(GPIO_PORTA_BASE, (GPIO_PIN_0 | GPIO_PIN_1));
+		UARTStdioConfig(0, UART_BAUDRATE, sys_clock);
+	}
+}
+
+void grideye_data(void)
+{
+	GPIOIntClear(GPIO_PORTE_BASE, GPIO_PIN_1);
+//	TimerIntClear(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
+	//Get grideye data
+	char grideye[127] = {};
+	for(i = 0; i < 127; i++)
+	{
+		grideye[i] = getI2C(SLAVE_ADDRESS, (128+i+1)); //temperature high register
+		grideye[i+1] = getI2C(SLAVE_ADDRESS, (128+i));  //temperature low register
+	}
+
+	send_data_packet(grideye);
+}
+
+void send_data_packet(char *data) //data should be 128 bytes long
+{
+	//  Data comes in as 128 byte char array (each temp register has a high and a low)
+	//	Use code below to parse on receiving end to get full temp value
+	//	temp[i] = high byte[i]
+	//	temp << 8;    /* redundant on first loop */
+	//	temp[i] += low byte[i];
+
+	//	packet needs to contain:
+	//	xbee frame stuff 17 bytes
+		//start delimiter
+		//two bytes for length
+		//frame type (0x10 for zigbee transmite request)
+		//frame id (set to 0x00 for no ack and 0x01 for ack)
+		//8 bytes for desitnation address (all 0s for coordinator FFFF for broadcast)
+		//2 bytes for network dest address (set to 0xFF 0xFE and use normal dest address)
+		//broadcast radius (0x00)
+		//options (0x00)
+	/////////actual RF data//////////
+	//	unit identifier 1 byte
+	//	data type 1 byte
+	//	data 128 bytes for grid eye
+	//	terminator 2 bytes (0xDF, 0xDF or 223,223)
+	//////end of actual Rf data//////
+	//	xbee frame checksum 1 byte (from byte after length to byte before checksum)
+
+	//initalizing array to beginning of xbee frame (doesn't include RF data or chksum)
+	char packet[150] = {0x7E, 0x00, 0x92, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x00, 0x00};
+	int i, sum = 0;
+
+	//appending RF data into packet
+	packet[17] = 0x01; //unit identifier: this unit is #1
+	packet[18] = duty; //co2 duty cycle
+
+	for(i = 0; i < 128; i++)
+	{
+		packet[19 + i] = *data;
+		data++;
+	}
+
+	//RF data terminators for parsing on receiving end
+	packet[147] = 0xDF;
+	packet[148] = 0xDF;
+
+	//	calculating check sum
+	//	xbeeframe data sums up to 0x20D
+	//	unit id, data type, and terminator sums to 0x1C0
+	//	total sum excluding rf data: 0x3CE
+	//	total sum including all 53 rf data: 0x1E4E
+	for(i = 3; i < 149; i++)
+	{
+		sum += packet[i];
+	}
+	packet[149] = (0xFF - (sum & 0xFF));
+
+	//send out that data!
+	for(i = 0; i < 150; i++)
+	{
+		UARTCharPut(UART1_BASE,packet[i]);
+	}
+
+}
+
+void duty_cycle(void)
+{
+	TimerIntClear(TIMER0_BASE, TIMER_CAPB_EVENT);
+	x += 1;
+	start = TimerValueGet(TIMER0_BASE, TIMER_A);
+	end = TimerValueGet(TIMER0_BASE, TIMER_B);
+	sum += (abs(start-end))/400;
+	if(x == 1000)
+	{
+		duty = sum / 1000;
+		sum = 0;
+		x = 0;
+	}
+
+}
+
+void setOpMode(int mode)
+{
+	//Set the operation mode based on arguement
+	//0x00 Normal mode
+	//0x10 Sleep mode
+	//0x20 Stand-by mode (60sec intermittence)
+	//0x21 Stand-by mode (10sec intermittence)
+	//Note! Once you're in sleep mode you have to return to normal mode before you can do anything else
+	sendI2C(SLAVE_ADDRESS, 2, 0x00, mode);
+}
+
+void setFrameRate(int frame_rate)
+{
+	//Set the frame rate based on arguement
+	//1: 1 FPS
+	//0: 10 FPS
+	sendI2C(SLAVE_ADDRESS, 2, 0x02, frame_rate);
+}
+
+void thermistor(void)
+{
+	int read;
+	int temp;
+	//Get the temperature of the thermistor
+	read = getI2C(SLAVE_ADDRESS,0x0F);
+	read <<= 8;
+	read |= getI2C(SLAVE_ADDRESS,0x0E);
+	//converts the value in the register to it's corresponding temperature
+	temp = read / 16;
+//	return temp;
+}
+
+void init_I2C(void)
+{
+
+	//enable the I2C module 0
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C0);
+	while(!(SysCtlPeripheralReady(SYSCTL_PERIPH_I2C0)));
+
+	//reset module
+	SysCtlPeripheralReset(SYSCTL_PERIPH_I2C0);
+
+	//enable GPIO peripheral that contains I2C 0
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+
+	// Configure the pin muxing for I2C0 functions on port B2 and B3.
+	GPIOPinConfigure(GPIO_PB2_I2C0SCL);
+	GPIOPinConfigure(GPIO_PB3_I2C0SDA);
+
+	// Select the I2C function for these pins.
+	// SDA = PB3
+	// SCL = PB2
+	GPIOPinTypeI2CSCL(GPIO_PORTB_BASE, GPIO_PIN_2);
+	GPIOPinTypeI2C(GPIO_PORTB_BASE, GPIO_PIN_3);
+
+	//Enable and initialize the I2C0 master module
+	I2CMasterInitExpClk(I2C0_BASE, sys_clock, false);
+
+}
+
+// function to transmit on i2c, first argument after data_amount is the register, then after that the value.
+// you can only write to one register with each function call.
+void sendI2C (int slave_addr, int data_amount, ...)
+{
+	int i;
+
+	// Tell the master module what address it will place on the bus when communicating with the slave.
+	// falce = write; true = read
+	I2CMasterSlaveAddrSet(I2C0_BASE, slave_addr, false);
+
+	//Creates a list of variables
+	va_list vdata;
+
+	//initialize the va_list with data_amount, then it'll start reading values from
+	//function arguements.
+	va_start(vdata, data_amount);
+
+	//put data to be sent into FIFO
+	I2CMasterDataPut(I2C0_BASE, va_arg(vdata, int));
+
+	//if there is only one argument, use the single send I2C function
+	if(data_amount == 2)
+	{
+		//Initiate send of data from the MCU
+		I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_SINGLE_SEND);
+
+		// Wait until MCU is done transferring.
+		while(I2CMasterBusy(I2C0_BASE));
+
+		//"close" variable argument list
+		va_end(vdata);
+	}
+
+	//otherwise, we start transmission of multiple bytes on the
+	//I2C bus
+	else if(data_amount > 2)
+	{
+		//Initiate send of data from the MCU
+		I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+
+		// Wait until MCU is done transferring.
+		while(I2CMasterBusy(I2C0_BASE));
+
+		//send num_of_args-2 pieces of data, using the
+		//BURST_SEND_CONT command of the I2C module
+		for(i = 1; i < (data_amount - 1); i++)
+		{
+			//put next piece of data into I2C FIFO
+			I2CMasterDataPut(I2C0_BASE, va_arg(vdata, int));
+			//send next data that was just placed into FIFO
+			I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_BURST_SEND_CONT);
+
+			// Wait until MCU is done transferring.
+			while(I2CMasterBusy(I2C0_BASE));
+		}
+
+		//put last piece of data into I2C FIFO
+		I2CMasterDataPut(I2C0_BASE, va_arg(vdata, int));
+		//send next data that was just placed into FIFO
+		I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+		// Wait until MCU is done transferring.
+		while(I2CMasterBusy(I2C0_BASE));
+
+		//"close" variable args list
+		va_end(vdata);
+	}
+}
+
+int getI2C(int slave_addr, int reg)
+{
+	//we first have to write the address to the i2c line to specify which slave we want to read from.
+	//false = write; true = read
+	I2CMasterSlaveAddrSet(I2C0_BASE, slave_addr, false);
+
+	//what register do you want to read
+	I2CMasterDataPut(I2C0_BASE, reg);
+
+	//send the register data to the slave
+	I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_SINGLE_SEND);
+
+	//wait for MCU to finish transaction
+	while(I2CMasterBusy(I2C0_BASE));
+
+	//specify that we are going to read from slave device
+	I2CMasterSlaveAddrSet(I2C0_BASE, slave_addr, true);
+
+	//send control byte and read from the register we specified
+	I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+
+	//wait for MCU to finish transaction
+	while(I2CMasterBusy(I2C0_BASE));
+
+	//return data pulled from the specified register
+	return I2CMasterDataGet(I2C0_BASE);
+}
