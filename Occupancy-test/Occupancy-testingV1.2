@@ -1,4 +1,5 @@
-Ovie Onoriose
+/*
+ * Ovie Onoriose
 
 Occupancy-testingV1.2
 
@@ -125,8 +126,22 @@ void init_trigger(void)
 	GPIOPadConfigSet(GPIO_PORTE_BASE, GPIO_PIN_1, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPD);
 	GPIOIntTypeSet(GPIO_PORTE_BASE, GPIO_PIN_1, GPIO_RISING_EDGE);
 	GPIOIntRegister(GPIO_PORTE_BASE, trigger);
-	IntEnable(INT_GPIOE_TM4C123);
 	GPIOIntEnable(GPIO_PORTE_BASE, GPIO_INT_PIN_1);
+
+
+	//Timer interrupt to use instead of trigger.
+//	// Enable and configure Timer1 peripheral.
+//	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
+//	// Configure as a 32-bit timer in periodic mode.
+//	TimerConfigure(TIMER1_BASE, TIMER_CFG_PERIODIC);
+//	// Initialize timer load register.
+//	TimerLoadSet(TIMER1_BASE, TIMER_A, sys_clock*TIMER_FREQ -1);
+//	// Registers a function to be called when the interrupt occurs.
+//	IntRegister(INT_TIMER1A, trigger);
+//	// The specified interrupt is enabled in the interrupt controller.
+//	IntEnable(INT_TIMER1A);
+//	// Enable the indicated timer interrupt source.
+//	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
 }
 
 void init_UART(int choice)
@@ -177,10 +192,10 @@ void trigger(void)
 void grideye(void)
 {
 	//Get grideye data
-	for(i = 0; i < 127; i++)
+	for(i=0; i < 64; i++)
 	{
-		grideye_data[i] = getI2C(SLAVE_ADDRESS, (128+i+1)); //temperature high register
-		grideye_data[i+1] = getI2C(SLAVE_ADDRESS, (128+i));  //temperature low register
+		grideye_data[2*i] = getI2C(SLAVE_ADDRESS, (129+(2*i))); //temperature high register
+		grideye_data[(2*i)+1] = getI2C(SLAVE_ADDRESS, (128+(2*i))); //temperature low register
 	}
 }
 
@@ -196,7 +211,7 @@ void send_data_packet(char *data) //data should be 128 bytes long
 	//	xbee frame stuff 17 bytes
 		//start delimiter
 		//two bytes for length
-		//frame type (0x10 for zigbee transmite request)
+		//frame type (0x10 for zigbee transmit request)
 		//frame id (set to 0x00 for no ack and 0x01 for ack)
 		//8 bytes for desitnation address (all 0s for coordinator FFFF for broadcast)
 		//2 bytes for network dest address (set to 0xFF 0xFE and use normal dest address)
@@ -205,13 +220,14 @@ void send_data_packet(char *data) //data should be 128 bytes long
 	/////////actual RF data//////////
 	//	unit identifier 1 byte
 	//	CO2 data 1 byte
+	//  RHT03 data 4 bytes
 	//	data 128 bytes for grid eye
 	//	terminator 2 bytes (0xDF, 0xDF or 223,223)
 	//////end of actual Rf data//////
 	//	xbee frame checksum 1 byte (from byte after length to byte before checksum)
 
 	//initalizing array to beginning of xbee frame (doesn't include RF data or chksum)
-	char packet[PACKET_SIZE] = {0x7E, 0x00, 0x92, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x00, 0x00};
+	char packet[PACKET_SIZE] = {0x7E, 0x00, 0x96, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x00, 0x00};
 	int i, sum = 0;
 
 	//appending RF data into packet
