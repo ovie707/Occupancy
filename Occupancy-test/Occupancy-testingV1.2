@@ -1,15 +1,25 @@
 /*
+/*
  * Ovie Onoriose
 
 Occupancy-testingV1.2
 
-Putting together all of the parts.
-Xbee activates a pin interrupt
-Launchpad reads data from the grideye and other sensors
-Data is sent back out through the Xbee, using API mode
+Receives a request from xbee coordinator using a pin interrupt
+Gathers data from sensors and creates packet to send back
+Sends packet back to Xbee coordinator, making use of Xbee API mode
 
-changelog:
-Added support for RHT03 Temperature and Humidity Sensor
+Sensors:
+Panasonic Grid-Eye
+Senseair S8 CO2 sensor
+RHT03 temp/humidty sensor
+
+Wireless:
+Xbee Pro S2B
+
+Changelog
+10/24/2016:
+added variable for node identifier
+
 */
 
 //includes
@@ -48,7 +58,7 @@ void sendI2C(int slave_addr, int data_amount, ...); //function to send values ov
 int getI2C(int slave_addr, int reg); //function to read registers over I2C
 
 //variables
-char duty = 0, grideye_data[127] = {0}, rht03_data[5] = {0};
+char duty = 0, grideye_data[127] = {0}, rht03_data[5] = {0}, node = 1;
 int sys_clock, start = 0, end = 0, x = 0, sum = 0, i, j, count;
 #define SLAVE_ADDRESS 0x68
 #define TIMER_FREQ 3
@@ -231,7 +241,7 @@ void send_data_packet(char *data) //data should be 128 bytes long
 	int i, sum = 0;
 
 	//appending RF data into packet
-	packet[17] = 0x01; //unit identifier: this unit is #1
+	packet[17] = node; //unit identifier: this unit is #1
 	packet[18] = duty; //co2 duty cycle
 	for(i = 0; i < 4; i++) //temp and humidity data
 	{
