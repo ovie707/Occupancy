@@ -1,0 +1,138 @@
+/*
+Ovie Onoriose
+
+XbeeComms V1.1
+
+Used to test Xbee Connection between Tiva Launchpad and Raspberry Pi
+*/
+
+//includes
+#include <stdint.h>
+#include <stdbool.h>
+//#include "inc/tm4c123gh6pm.h"
+#include "inc/hw_memmap.h"
+#include "inc/hw_types.h"
+#include "inc/hw_ints.h"
+#include "driverlib/ssi.h"
+#include "driverlib/sysctl.h"
+#include "driverlib/interrupt.h"
+#include "driverlib/gpio.h"
+#include "driverlib/timer.h"
+#include "driverlib/pin_map.h"
+#include "driverlib/uart.h"
+#include "utils/uartstdio.h"
+
+//function prototypes
+void init_UART(void);
+void send_packet(void);
+void init_timer(void);
+
+
+//variables
+uint8_t ui8PinData=2;
+int sys_clock, i, z = 0;
+#define TIMER_FREQ 1
+#define UART_BAUDRATE 115200
+
+int main(void)
+{
+	// Sets the system clock to run using a 16 MHz crystal on the main oscillator to drive the 400 MHz PLL.
+	SysCtlClockSet(SYSCTL_SYSDIV_5|SYSCTL_USE_PLL|SYSCTL_XTAL_16MHZ|SYSCTL_OSC_MAIN);
+	sys_clock = SysCtlClockGet();
+
+	init_timer();
+	init_UART();
+
+	// Enables GPIO port F
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+	GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3);
+
+//	TimerEnable(TIMER1_BASE, TIMER_A);
+
+
+
+	while(1)
+	{}
+
+
+}
+
+void init_timer(void)
+{
+//	// Enable and configure Timer1 peripheral.
+//	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
+//	// Configure as a 32-bit timer in periodic mode.
+//	TimerConfigure(TIMER1_BASE, TIMER_CFG_PERIODIC);
+//	// Initialize timer load register.
+//	TimerLoadSet(TIMER1_BASE, TIMER_A, sys_clock/TIMER_FREQ -1);
+//	// Registers a function to be called when the interrupt occurs.
+//	IntRegister(INT_TIMER1A, send_packet);
+//	// The specified interrupt is enabled in the interrupt controller.
+//	IntEnable(INT_TIMER1A);
+//	// Enable the indicated timer interrupt source.
+//	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
+	// Enable and configure PE1 as digital input
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
+	GPIOPinTypeGPIOInput(GPIO_PORTE_BASE, GPIO_PIN_1);
+	GPIOPadConfigSet(GPIO_PORTE_BASE, GPIO_PIN_1, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPD);
+	GPIOIntTypeSet(GPIO_PORTE_BASE, GPIO_PIN_1, GPIO_RISING_EDGE);
+	GPIOIntRegister(GPIO_PORTE_BASE, send_packet);
+	GPIOIntEnable(GPIO_PORTE_BASE, GPIO_INT_PIN_1);
+	IntMasterEnable();
+}
+
+void init_UART(void)
+{
+	//PB0 is input
+	//PB1 is output
+
+	// Enable and configure UART1 for debugging printouts.
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART1);
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+	GPIOPinConfigure(GPIO_PB0_U1RX);
+	GPIOPinConfigure(GPIO_PB1_U1TX);
+	GPIOPinTypeUART(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
+	UARTStdioConfig(1, UART_BAUDRATE, sys_clock);
+}
+
+/*
+//use this one to output to Putty
+void init_UART(void)
+{
+	// Enable and configure UART0 for debugging printouts.
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+	GPIOPinConfigure(GPIO_PA0_U0RX);
+	GPIOPinConfigure(GPIO_PA1_U0TX);
+	GPIOPinTypeUART(GPIO_PORTA_BASE, (GPIO_PIN_0 | GPIO_PIN_1));
+	UARTStdioConfig(0, UART_BAUDRATE, sys_clock);
+}
+*/
+
+void send_packet(void)
+{
+//	TimerIntClear(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
+	GPIOIntClear(GPIO_PORTE_BASE, GPIO_PIN_1);
+
+
+//	if(GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_2))
+//	{
+//		GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, 0);
+//	}
+//	else
+//	{
+//		GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_2, 4);
+//	}
+//}
+
+	//this packet sends test from coordinator to router
+	//char packet[] = {0x7E, 0x00, 0x12, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x00, 0x74, 0x65, 0x73, 0x74, 0x33};
+
+	//this packet sends test from router to coordinator
+	char packet[] = {0x7E, 0x00, 0x12, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x00, 0x00, 0x74, 0x65, 0x73, 0x74, 0x31};
+
+
+	for(i = 0; i < sizeof(packet); i++)
+		UARTCharPut(UART1_BASE, packet[i]);
+}
