@@ -20,3 +20,5 @@ Occupancy-testingV1-2 uses Tivaware 2.1.2.111
 
 Current sensors:
 Panasonic Grideye, SenseAir S8 CO2 sensor, RHT03 temperature/humidity sensor
+
+Also contains code to test Xbee API mode connection.
