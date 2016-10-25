@@ -19,6 +19,4 @@ Contains C code used on the Launchpad MCU to gather data from the sensors and se
 Occupancy-testingV1-2 uses Tivaware 2.1.2.111
 
 Current sensors:
-Panasonic Grideye
-SenseAir S8 CO2 sensor
-RHT03 temperature/humidity sensor
+Panasonic Grideye, SenseAir S8 CO2 sensor, RHT03 temperature/humidity sensor
