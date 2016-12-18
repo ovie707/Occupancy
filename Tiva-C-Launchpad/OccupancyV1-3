@@ -2,7 +2,7 @@
 /*
  * Ovie Onoriose
 
-Occupancy-testingV1.2
+OccupancyV1.3
 
 Receives a request from xbee coordinator using a pin interrupt
 Gathers data from sensors and creates packet to send back
@@ -19,6 +19,9 @@ Xbee Pro S2B
 Changelog
 10/24/2016:
 added variable for node identifier
+
+11/21/2016
+added support for PIR sensor (init_PIR)
 
 */
 
@@ -42,6 +45,7 @@ added variable for node identifier
 #include "utils/uartstdio.h"
 
 //function prototypes
+void init_PIR(void); //sets up pin PE3 for PIR input
 void init_CO2(void); //enables timers to read the duty cycle off of the CO2 sensor
 void init_trigger(void); // enables pin interupt so Rpi can request data through the xbee digital output using a remote at command
 void init_UART(int choice); // enables uart
@@ -58,14 +62,14 @@ void sendI2C(int slave_addr, int data_amount, ...); //function to send values ov
 int getI2C(int slave_addr, int reg); //function to read registers over I2C
 
 //variables
-char duty = 0, grideye_data[127] = {0}, rht03_data[5] = {0}, node = 1;
+char duty = 0, grideye_data[127] = {0}, rht03_data[5] = {0}, node = 1, pir = 0;
 int sys_clock, start = 0, end = 0, x = 0, sum = 0, i, j, count;
 #define SLAVE_ADDRESS 0x68
 #define TIMER_FREQ 3
 #define UART_BAUDRATE 115200
 #define XBEE 1
 #define PUTTY 0
-#define PACKET_SIZE 154
+#define PACKET_SIZE 155
 int main(void)
 {
 	// Run the clock at 40Mhz
@@ -74,6 +78,7 @@ int main(void)
 
 	IntMasterEnable();
 
+	init_PIR();
 	init_CO2();
 	init_I2C();
 	setOpMode(0x00); //setting the operation mode of the grideye
@@ -86,6 +91,13 @@ int main(void)
 	init_UART(XBEE); //set to 1 for xBee output //set to 0 for Putty output
 
 	while(1){}
+}
+
+void init_PIR(void)
+{
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
+	GPIOPinTypeGPIOInput(GPIO_PORTE_BASE, GPIO_PIN_3);
+	GPIOPadConfigSet(GPIO_PORTE_BASE, GPIO_PIN_3, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPD);
 }
 
 void init_CO2(void)
@@ -184,17 +196,22 @@ void trigger(void)
 {
 	GPIOIntClear(GPIO_PORTE_BASE, GPIO_PIN_1);
 
+	//get grideye data
 	for(i = 0; i < 127; i++)
 	{
 		grideye_data[i] = 0;
 	}
 	grideye();
 
+	//get temp and humidity data
 	for(i = 0; i < 5; i++)
 	{
 		rht03_data[i] = 0;
 	}
 	rht03();
+
+	//get pir data
+	pir = GPIOPinRead(GPIO_PORTE_BASE, GPIO_PIN_3);
 
 	send_data_packet(grideye_data);
 }
@@ -211,7 +228,7 @@ void grideye(void)
 
 void send_data_packet(char *data) //data should be 128 bytes long
 {
-	//  Data comes in as 128 byte char array (each temp register has a high and a low)
+	//  data comes in as 128 byte char array (each temp register has a high and a low)
 	//	Use code below to parse on receiving end to get full temp value
 	//	temp[i] = high byte[i]
 	//	temp << 8;    /* redundant on first loop */
@@ -228,13 +245,14 @@ void send_data_packet(char *data) //data should be 128 bytes long
 		//broadcast radius (0x00)
 		//options (0x00)
 	/////////actual RF data//////////
-	//	unit identifier 1 byte
-	//	CO2 data 1 byte
-	//  RHT03 data 4 bytes
-	//	data 128 bytes for grid eye
-	//	terminator 2 bytes (0xDF, 0xDF or 223,223)
+	//	unit identifier 1 byte [17]
+	//	CO2 data 1 byte [18]
+	//  RHT03 data 4 bytes [19-22]
+	//	PIR data 1 byte [23]
+	//	data 128 bytes for grid eye [24 - 151]
+	//	terminator 2 bytes (0xDF, 0xDF or 223,223) [152 - 153]
 	//////end of actual Rf data//////
-	//	xbee frame checksum 1 byte (from byte after length to byte before checksum)
+	//	xbee frame checksum 1 byte (from byte after length to byte before checksum) [154]
 
 	//initalizing array to beginning of xbee frame (doesn't include RF data or chksum)
 	char packet[PACKET_SIZE] = {0x7E, 0x00, 0x96, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x00, 0x00};
@@ -247,23 +265,23 @@ void send_data_packet(char *data) //data should be 128 bytes long
 	{
 		packet[19+i] = rht03_data[i];
 	}
-
+	packet[23] = pir; //PIR data
 	for(i = 0; i < 128; i++) //grideye data
 	{
-		packet[23 + i] = *data;
+		packet[24 + i] = *data;
 		data++;
 	}
 
 	//RF data terminators for parsing on receiving end
-	packet[151] = 0xDF;
 	packet[152] = 0xDF;
+	packet[153] = 0xDF;
 
 	//	calculating check sum
 	for(i = 3; i < PACKET_SIZE - 1; i++)
 	{
 		sum += packet[i];
 	}
-	packet[153] = (0xFF - (sum & 0xFF));
+	packet[154] = (0xFF - (sum & 0xFF));
 
 	//send out that data!
 	for(i = 0; i < PACKET_SIZE; i++)
