@@ -16,6 +16,7 @@ Each file includes a header for more info
 
 #Tiva-C-Launchpad
 Contains C code used on the Launchpad MCU to gather data from the sensors and send it to the Rapsberry Pi.
+
 OccupancyV1-3 uses Tivaware 2.1.2.111
 
 Current sensors:
