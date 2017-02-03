@@ -11,11 +11,12 @@ Contains older files used during undergraduate project
 #Raspberry-Pi
 Contains python code used on the central Raspberry Pi
 RPiOccupancy (2 versions) 1 for storing data in local sqlite database and another for storing in a remote mySQL database
+
 Each file includes a header for more info
 
 #Tiva-C-Launchpad
 Contains C code used on the Launchpad MCU to gather data from the sensors and send it to the Rapsberry Pi.
-Occupancy-testingV1-2 uses Tivaware 2.1.2.111
+OccupancyV1-3 uses Tivaware 2.1.2.111
 
 Current sensors:
 Panasonic Grideye, SenseAir LP-8 CO2 sensor, RHT03 temperature/humidity sensor
