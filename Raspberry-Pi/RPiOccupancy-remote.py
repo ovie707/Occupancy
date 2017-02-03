@@ -46,12 +46,12 @@ from collections import Counter
 import atexit
 
 # open serial port and connect to database
-db_host = '192.168.1.125'
-db_port = 3306
-db_user = 'nodeuser01'
-db_passwd = 'tempp@ssw0rd'
-db_database = 'ovietest'
-db_table = 'testdata'
+db_host = 'IP GOES HERE'
+db_port = PORT GOES HERE
+db_user = 'USER GOES HERE'
+db_passwd = 'PASSWORD GOES HERE'
+db_database = 'DATABASE NAME GOES HERE'
+db_table = 'TABLE NAME GOES HERE'
 
 try:
     conn = pymysql.connect(host = db_host,
