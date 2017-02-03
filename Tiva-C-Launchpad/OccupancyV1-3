@@ -1,5 +1,4 @@
 /*
-/*
  * Ovie Onoriose
 
 OccupancyV1.3
@@ -151,7 +150,7 @@ void init_trigger(void)
 	GPIOIntEnable(GPIO_PORTE_BASE, GPIO_INT_PIN_1);
 
 
-	//Timer interrupt to use instead of trigger.
+//	//Timer interrupt to use instead of trigger.
 //	// Enable and configure Timer1 peripheral.
 //	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
 //	// Configure as a 32-bit timer in periodic mode.
@@ -195,6 +194,7 @@ void init_UART(int choice)
 void trigger(void)
 {
 	GPIOIntClear(GPIO_PORTE_BASE, GPIO_PIN_1);
+	//TimerIntClear(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
 
 	//get grideye data
 	for(i = 0; i < 127; i++)
@@ -255,10 +255,10 @@ void send_data_packet(char *data) //data should be 128 bytes long
 	//	xbee frame checksum 1 byte (from byte after length to byte before checksum) [154]
 
 	//initalizing array to beginning of xbee frame (doesn't include RF data or chksum)
-	char packet[PACKET_SIZE] = {0x7E, 0x00, 0x96, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x00, 0x00};
+	char packet[PACKET_SIZE] = {0x7E, 0x00, 0x97, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x00, 0x00};
 	int i, sum = 0;
 
-	//appending RF data into packet
+	//appending RF data into packet (TOTAL 137 bytes)
 	packet[17] = node; //unit identifier: this unit is #1
 	packet[18] = duty; //co2 duty cycle
 	for(i = 0; i < 4; i++) //temp and humidity data
