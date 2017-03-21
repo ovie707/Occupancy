@@ -9,7 +9,7 @@
 #   Date:               01/22/2017                                                              #
 #                                                                                               #
 #   Title:              Occupancy Client for Raspberry Pi                                       #
-#   Version:            6.1                                                                     #
+#   Version:            6.1.2                                                                   #
 #                                                                                               #
 #   Description:                                                                                #
 #       This script sends a probe request on the Xbee connected to the Raspberry Pi             #
@@ -26,7 +26,10 @@
 #       code to reflect the new protocol. The sensor nodes will also need to be updated         #
 #       to support the new mode of CO2 sensor                                                   #
 #                                                                                               #
-#   Change Log:                                                                                 #
+#   Change Log:
+#       v6.1.2 ((03/01/2017)
+#           added trigger column to database if a pixel is higher than a certain
+#           threshold                                                                           #
 #       v6.1 (01/22/2017)                                                                       #
 #           In the case that a node loses power or otherwise becomes unresponsive,              #
 #           Node discovery is performed to repopulate the list of active nodes so               #
@@ -44,7 +47,7 @@ from collections import Counter
 ser = serial.Serial('COM5', 115200, timeout=5)  # open serial port
 conn = sqlite3.connect('occupancy.db')  # connect to the database
 c = conn.cursor()
-c.execute("CREATE TABLE IF NOT EXISTS data (Node real, Datetime text, Grideye text, CO2PPM real, Temperature real, \
+c.execute("CREATE TABLE IF NOT EXISTS data (Node real, Datetime text, Grideye text, Trigger int, CO2PPM real, Temperature real, \
 Humidity real, PIR real)")
 
 node_list = []
@@ -153,12 +156,13 @@ def read_packet():
 
 
 def data_store(l):
-    grideye = [0 for i in range(70)]
+    grideye = [0 for i in range(64)]
     data = ser.read(l)  # read rest of packet
     print('data received:')
     print(MyList(list(data)))
     print('\n')
 
+    trigger = 0
     # Break data into more manageable sections
     # sixty four source address=data[0:8]
     # sixteen source address=data[8:10]
@@ -172,6 +176,8 @@ def data_store(l):
 
     for i in range(64):
         grideye[i] = (((rf_data[2 * i + 7] << 8) | rf_data[2 * i + 8]) / 4)
+        if grideye[i] > 25:
+            trigger = 1
 
     # map grideye data to a string for simplicity in entering them into the database
     grid_str = ','.join(map(str, grideye))
@@ -180,8 +186,8 @@ def data_store(l):
     current = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S:%f")
 
     # insert data into database
-    c.execute("INSERT INTO data(Node, Datetime, Grideye, CO2PPM, Temperature, Humidity, PIR) VALUES (?, ?, ?, ?, ?, ?, ?)",
-             (node, current, grid_str, co2, temp, humid, pir))
+    c.execute("INSERT INTO data(Node, Datetime, Grideye, Trigger, CO2PPM, Temperature, Humidity, PIR) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             (node, current, grid_str, trigger, co2, temp, humid, pir))
     conn.commit()
 
 
